@@ -1,0 +1,51 @@
+---
+- name: Remove Apache and PHP from Ubuntu and CentOS servers
+  hosts: all
+  become: yes
+  tasks:
+    # --- Ubuntu/Debian tasks ---
+    - name: Remove Apache and PHP packages on Ubuntu/Debian
+      apt:
+        name:
+          - apache2
+          - php
+          - libapache2-mod-php
+          - php-cli
+          - php-mysql
+        state: absent
+        purge: yes
+        autoremove: yes
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Stop and disable Apache service (Ubuntu)
+      service:
+        name: apache2
+        state: stopped
+        enabled: no
+      when: ansible_facts['os_family'] == "Debian"
+
+    # --- CentOS/RHEL tasks ---
+    - name: Remove Apache and PHP packages on CentOS/RHEL
+      yum:
+        name:
+          - httpd
+          - php
+          - php-cli
+          - php-mysqlnd
+        state: absent
+        autoremove: yes
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Stop and disable Apache service (CentOS)
+      service:
+        name: httpd
+        state: stopped
+        enabled: no
+      when: ansible_facts['os_family'] == "RedHat"
+
+    # --- Common cleanup ---
+    - name: Remove PHP test file if it exists
+      file:
+        path: /var/www/html/info.php
+        state: absent
+      when: ansible_facts['os_family'] in ["Debian", "RedHat"]
