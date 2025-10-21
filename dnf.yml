@@ -1,0 +1,9 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: Ensure DNF is installed on CentOS
+      ansible.builtin.yum:
+        name: dnf
+        state: present
+      when: ansible_distribution == "CentOS"

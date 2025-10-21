@@ -1,12 +1,13 @@
-[ubuntu]
-192.168.0.134
+[web_servers]
 192.168.0.214
-192.168.0.135
+192.168.0.102
+192.168.0.209
+
+[db_servers]
 192.168.0.114
 
-[centos]
-192.168.0.209
-192.168.0.102
+[file_servers]
+192.168.0.135
 
-192.168.0.134 ansible_user=student ansible_become=yes ansible_become_method=sudo ansible_become_pass='YourSudoPassword'
+
 
