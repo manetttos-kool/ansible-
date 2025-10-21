@@ -1,0 +1,68 @@
+---
+- name: Install Apache and PHP on Ubuntu and CentOS servers
+  hosts: all
+  become: yes
+  tasks:
+    # --- Ubuntu/Debian tasks ---
+    - name: Install Apache and PHP on Ubuntu/Debian
+      apt:
+        name:
+          - apache2
+          - php
+          - libapache2-mod-php
+          - php-cli
+          - php-mysql
+        state: present
+        update_cache: yes
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Ensure Apache service is enabled and started (Ubuntu)
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Allow HTTP traffic on port 80 (Ubuntu with ufw)
+      command: ufw allow 80/tcp
+      when:
+        - ansible_facts['os_family'] == "Debian"
+        - "'ufw' in ansible_facts.packages or 'ufw' in ansible_facts.services"
+
+    # --- CentOS/RHEL tasks ---
+    - name: Install Apache and PHP on CentOS/RHEL
+      yum:
+        name:
+          - httpd
+          - php
+          - php-cli
+          - php-mysqlnd
+        state: present
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Ensure Apache service is enabled and started (CentOS)
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Open port 80 in firewalld (CentOS)
+      firewalld:
+        port: 80/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts['os_family'] == "RedHat"
+
+    # --- Common tasks ---
+    - name: Restart Apache to apply PHP integration
+      service:
+        name: "{{ 'apache2' if ansible_facts['os_family'] == 'Debian' else 'httpd' }}"
+        state: restarted
+
+    - name: Create a PHP test page
+      copy:
+        dest: /var/www/html/info.php
+        content: "<?php phpinfo(); ?>"
+      when: ansible_facts['os_family'] in ["Debian", "RedHat"]
