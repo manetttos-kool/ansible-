@@ -1,0 +1,60 @@
+---
+- name: Install Apache and PHP on Ubuntu and CentOS servers
+  hosts: all
+  become: yes
+  vars:
+    apache_service: "{{ 'apache2' if ansible_facts['os_family'] == 'Debian' else 'httpd' }}"
+    apache_packages:
+      Debian:
+        - apache2
+        - php
+        - libapache2-mod-php
+        - php-cli
+        - php-mysql
+      RedHat:
+        - httpd
+        - php
+        - php-cli
+        - php-mysqlnd
+
+  tasks:
+    - name: Install Apache and PHP packages
+      package:
+        name: "{{ apache_packages[ansible_facts['os_family']] }}"
+        state: present
+        update_cache: yes
+      when: ansible_facts['os_family'] in ['Debian', 'RedHat']
+
+    - name: Ensure Apache service is enabled and started
+      service:
+        name: "{{ apache_service }}"
+        state: started
+        enabled: yes
+
+    - name: Configure firewall (Debian with ufw)
+      community.general.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Configure firewall (RedHat with firewalld)
+      ansible.posix.firewalld:
+        port: 80/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Create PHP test page
+      copy:
+        dest: /var/www/html/info.php
+        content: "<?php phpinfo(); ?>"
+        mode: '0644'
+      notify: Restart Apache
+
+  handlers:
+    - name: Restart Apache
+      service:
+        name: "{{ apache_service }}"
+        state: restarted
