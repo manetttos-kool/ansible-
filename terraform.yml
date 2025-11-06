@@ -1,0 +1,105 @@
+---
+- name: Install Terraform on Workstation servers
+  hosts: workstation
+  become: yes
+  vars:
+    terraform_version: "1.9.8"  # Update this to the version you want
+    terraform_install_path: "/usr/local/bin"
+    
+  tasks:
+    - name: Set architecture mapping
+      set_fact:
+        arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+    
+    - name: Get system architecture
+      set_fact:
+        system_arch: "{{ arch_map[ansible_architecture] }}"
+    
+    - name: Display detected OS and architecture
+      debug:
+        msg: "Installing Terraform {{ terraform_version }} for {{ ansible_distribution }} ({{ system_arch }}) on {{ ansible_hostname }}"
+    
+    - name: Install prerequisites (CentOS/RHEL)
+      yum:
+        name:
+          - unzip
+          - wget
+        state: present
+      when: ansible_os_family == "RedHat"
+    
+    - name: Install prerequisites (Ubuntu/Debian)
+      apt:
+        name:
+          - unzip
+          - wget
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+    
+    - name: Check if Terraform is already installed
+      command: terraform version
+      register: terraform_installed
+      ignore_errors: yes
+      changed_when: false
+    
+    - name: Parse installed Terraform version
+      set_fact:
+        installed_version: "{{ terraform_installed.stdout | regex_search('Terraform v([0-9.]+)', '\\1') | first }}"
+      when: terraform_installed.rc == 0
+      ignore_errors: yes
+    
+    - name: Display current Terraform version if installed
+      debug:
+        msg: "Terraform {{ installed_version }} is already installed"
+      when: 
+        - terraform_installed.rc == 0
+        - installed_version is defined
+    
+    - name: Download Terraform
+      get_url:
+        url: "https://releases.hashicorp.com/terraform/{{ terraform_version }}/terraform_{{ terraform_version }}_linux_{{ system_arch }}.zip"
+        dest: "/tmp/terraform_{{ terraform_version }}_linux_{{ system_arch }}.zip"
+        mode: '0644'
+      when: terraform_installed.rc != 0 or installed_version != terraform_version
+    
+    - name: Create temporary extraction directory
+      file:
+        path: "/tmp/terraform_extract"
+        state: directory
+        mode: '0755'
+      when: terraform_installed.rc != 0 or installed_version != terraform_version
+    
+    - name: Unzip Terraform
+      unarchive:
+        src: "/tmp/terraform_{{ terraform_version }}_linux_{{ system_arch }}.zip"
+        dest: "/tmp/terraform_extract"
+        remote_src: yes
+      when: terraform_installed.rc != 0 or installed_version != terraform_version
+    
+    - name: Install Terraform binary
+      copy:
+        src: "/tmp/terraform_extract/terraform"
+        dest: "{{ terraform_install_path }}/terraform"
+        mode: '0755'
+        remote_src: yes
+      when: terraform_installed.rc != 0 or installed_version != terraform_version
+    
+    - name: Clean up downloaded files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/terraform_{{ terraform_version }}_linux_{{ system_arch }}.zip"
+        - "/tmp/terraform_extract"
+      when: terraform_installed.rc != 0 or installed_version != terraform_version
+    
+    - name: Verify Terraform installation
+      command: terraform version
+      register: terraform_verify
+      changed_when: false
+    
+    - name: Display installed Terraform version
+      debug:
+        msg: "{{ terraform_verify.stdout_lines }}"

@@ -1,0 +1,228 @@
+---
+# lamp.yml
+- name: Deploy LAMP stack on Ubuntu and CentOS/RHEL
+  hosts: all
+  become: true
+  vars:
+    # ---- App & DB settings (override in group_vars/host_vars as needed) ----
+    app_root: /var/www/html
+    app_index_content: |
+      <?php
+      phpinfo();
+      ?>
+    db_name: appdb
+    db_user: appuser
+    db_password: StrongPasswordHere
+    # If your MariaDB root uses unix_socket (default), leave blank:
+    mysql_root_password: ""
+    # Manage firewall rules (port 80/443)
+    manage_firewall: true
+
+    # Package maps
+    pkgs_common_ubuntu:
+      - apache2
+      - php
+      - libapache2-mod-php
+      - php-mysql
+      - mariadb-server
+      - python3-pymysql
+    pkgs_common_centos:
+      - httpd
+      - php
+      - php-mysqlnd
+      - mariadb-server
+      - python3-PyMySQL
+
+    apache_service_ubuntu: apache2
+    apache_service_centos: httpd
+    mariadb_service: mariadb
+
+  pre_tasks:
+    - name: Ensure package cache is up to date (Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Ensure package cache is up to date (RHEL/CentOS)
+      dnf:
+        update_cache: yes
+      when:
+        - ansible_facts['os_family'] == "RedHat"
+        - ansible_facts['pkg_mgr'] == "dnf"
+
+  tasks:
+    - name: Install LAMP packages (Ubuntu)
+      apt:
+        name: "{{ pkgs_common_ubuntu }}"
+        state: present
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Install LAMP packages (CentOS/RHEL)
+      package:
+        name: "{{ pkgs_common_centos }}"
+        state: present
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Enable Apache modules on Ubuntu (rewrite recommended)
+      command: a2enmod rewrite
+      args:
+        creates: /etc/apache2/mods-enabled/rewrite.load
+      notify: restart apache
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Ensure Apache is enabled and started
+      service:
+        name: >-
+          {{ apache_service_ubuntu if ansible_facts['os_family']=="Debian"
+             else apache_service_centos }}
+        state: started
+        enabled: yes
+
+    - name: Ensure MariaDB is enabled and started
+      service:
+        name: "{{ mariadb_service }}"
+        state: started
+        enabled: yes
+
+    # ---------- Optional: basic DB secure-ish setup ----------
+    # If root has no password and uses unix_socket, leave mysql_root_password empty.
+    - name: Set MariaDB root password if provided (socket or localhost)
+      community.mysql.mysql_user:
+        login_user: root
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: root
+        host: localhost
+        password: "{{ mysql_root_password }}"
+        state: present
+      when:
+        - mysql_root_password | length > 0
+        - ansible_facts['os_family'] == "Debian"
+
+    - name: Set MariaDB root password if provided (CentOS socket path)
+      community.mysql.mysql_user:
+        login_user: root
+        login_unix_socket: /var/lib/mysql/mysql.sock
+        name: root
+        host: localhost
+        password: "{{ mysql_root_password }}"
+        state: present
+      when:
+        - mysql_root_password | length > 0
+        - ansible_facts['os_family'] == "RedHat"
+
+    - name: Remove anonymous MySQL users
+      community.mysql.mysql_user:
+        name: ''
+        host_all: true
+        state: absent
+        login_user: root
+        login_unix_socket: >-
+          {{ '/var/run/mysqld/mysqld.sock' if ansible_facts['os_family']=='Debian'
+             else '/var/lib/mysql/mysql.sock' }}
+
+    - name: Remove test database
+      community.mysql.mysql_db:
+        name: test
+        state: absent
+        login_user: root
+        login_unix_socket: >-
+          {{ '/var/run/mysqld/mysqld.sock' if ansible_facts['os_family']=='Debian'
+             else '/var/lib/mysql/mysql.sock' }}
+
+    # ---------- App DB/user ----------
+    - name: Create application database
+      community.mysql.mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        encoding: utf8mb4
+        collation: utf8mb4_unicode_ci
+        login_user: root
+        login_unix_socket: >-
+          {{ '/var/run/mysqld/mysqld.sock' if ansible_facts['os_family']=='Debian'
+             else '/var/lib/mysql/mysql.sock' }}
+
+    - name: Create application DB user and grant privileges
+      community.mysql.mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        host: "%"
+        state: present
+        login_user: root
+        login_unix_socket: >-
+          {{ '/var/run/mysqld/mysqld.sock' if ansible_facts['os_family']=='Debian'
+             else '/var/lib/mysql/mysql.sock' }}
+
+    # ---------- Deploy a simple PHP page ----------
+    - name: Ensure document root exists
+      file:
+        path: "{{ app_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy index.php
+      copy:
+        dest: "{{ app_root }}/index.php"
+        content: "{{ app_index_content }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart apache
+
+    # ---------- Optional firewall rules ----------
+    - name: Allow HTTP/HTTPS via firewalld (CentOS/RHEL)
+      when:
+        - manage_firewall
+        - ansible_facts['os_family'] == "RedHat"
+      block:
+        - name: Ensure firewalld is installed
+          package:
+            name: firewalld
+            state: present
+        - name: Ensure firewalld is running and enabled
+          service:
+            name: firewalld
+            state: started
+            enabled: yes
+        - name: Open ports 80 and 443
+          firewalld:
+            service: "{{ item }}"
+            permanent: yes
+            state: enabled
+            immediate: yes
+          loop:
+            - http
+            - https
+
+    - name: Allow HTTP/HTTPS via UFW (Ubuntu) if UFW present
+      when:
+        - manage_firewall
+        - ansible_facts['os_family'] == "Debian"
+      block:
+        - name: Install ufw if missing
+          apt:
+            name: ufw
+            state: present
+        - name: Allow HTTP
+          ufw:
+            rule: allow
+            name: "Apache"
+        - name: Allow HTTPS
+          ufw:
+            rule: allow
+            port: "443"
+            proto: tcp
+        - name: Ensure ufw is enabled
+          ufw:
+            state: enabled
+
+  handlers:
+    - name: restart apache
+      service:
+        name: >-
+          {{ apache_service_ubuntu if ansible_facts['os_family']=="Debian"
+             else apache_service_centos }}
+        state: restarted
