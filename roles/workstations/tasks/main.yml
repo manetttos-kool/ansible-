@@ -1,0 +1,38 @@
+---
+- name: Install Terraform on Workstation servers
+  hosts: workstation
+  become: yes
+  vars:
+    terraform_version: "1.9.8"  # Update this to the version you want
+    terraform_install_path: "/usr/local/bin"
+    
+  tasks:
+    - name: Set architecture mapping
+      set_fact:
+        arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+    
+    - name: Get system architecture
+      set_fact:
+        system_arch: "{{ arch_map[ansible_architecture] }}"
+    
+    - name: Display detected OS and architecture
+      debug:
+        msg: "Installing Terraform {{ terraform_version }} for {{ ansible_distribution }} ({{ system_arch }}) on {{ ansible_hostname }}"
+    
+    - name: Install prerequisites (CentOS/RHEL)
+      yum:
+        name:
+          - unzip
+          - wget
+        state: present
+      when: ansible_os_family == "RedHat"
+    
+    - name: Install prerequisites (Ubuntu/Debian)
+      apt:
+        name:
+          - unzip
+          - wget
+        state: present
+        update_cache: yes
