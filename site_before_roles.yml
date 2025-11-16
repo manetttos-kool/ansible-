@@ -1,0 +1,94 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: update repo cache on CentOS
+      tags: always
+      ansible.builtin.yum:
+        update_cache: yes
+      changed_when: false
+      when: ansible_distribution == "CentOS"
+
+    - name: update repo cache on Ubuntu
+      tags: always
+      ansible.builtin.apt:
+        update_cache: yes
+      changed_when: false
+      when: ansible_distribution == "Ubuntu"
+
+- hosts: all
+  become: true
+  tasks:
+
+    - name: add ssh key to simone
+      tags: always
+      authorized_key:
+        user: simone
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPf7zs43ojV6Gboxs6urfAfsi6zILZiR1iZig02wawFt ansible"
+
+- hosts: web_servers
+  become: true
+  tasks:
+    - name: Install Apache and PHP on Ubuntu servers
+      tags: apache,apache2,ubuntu
+      ansible.builtin.apt:
+        name:
+          - apache2
+          - libapache2-mod-php
+        state: latest
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Install Apache and PHP on CentOS servers
+      tags: apache,centos,httpd
+      ansible.builtin.yum:
+        name:
+          - httpd
+          - php
+        state: latest
+      when: ansible_distribution == "CentOS"
+     
+    - name: start httpd (centos)
+      tags: apache,centos,httpd
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_distribution == "Centos"
+     
+    - name: copy default html file for site
+      tags: apache,apache2,httpd
+      copy:
+        src: default_site.html
+        dest: /var/www/html/index.html
+        owner: root
+        group: root
+        mode: 0644 
+
+- hosts: db_servers
+  become: true
+  tasks: 
+    - name: install mariadb package (Centos)
+      tags: centos,db,mariadb
+      ansible.builtin.yum:
+        name:
+          - mariadb
+        state: latest
+      when: ansible_distribution == "Centos"
+
+    - name: install mariadb package (Ubuntu)
+      tags: db,mariadb,ubuntu
+      ansible.builtin.apt:
+        name:
+          - mariadb-server
+        state: latest
+      when: ansible_distribution == "Ubuntu"
+
+- hosts: file_servers
+  become: true
+  tasks: 
+    - name: install samba package
+      tags: samba
+      package:
+        name:
+          - samba
+        state: latest
